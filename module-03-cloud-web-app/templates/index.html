@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CloudPulse | Service Uptime & Incident Monitor</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #f8fafc;
+      --muted: #94a3b8;
+      --up: #10b981;
+      --down: #ef4444;
+      --pending: #f59e0b;
+      --accent: #3b82f6;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, -apple-system, sans-serif; }
+    body { background: var(--bg); color: var(--text); padding: 2rem 1rem; }
+    .container { max-width: 960px; margin: 0 auto; }
+    header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem; margin-bottom: 2rem; border-bottom: 1px solid var(--border); padding-bottom: 1rem; }
+    h1 { font-size: 1.5rem; display: flex; align-items: center; gap: 0.5rem; }
+    .subtitle { color: var(--muted); font-size: 0.9rem; margin-top: 0.25rem; }
+    button { background: var(--accent); color: white; border: none; padding: 0.6rem 1.1rem; border-radius: 6px; font-weight: 600; cursor: pointer; }
+    button:hover { opacity: 0.9; }
+    button.danger { background: transparent; color: var(--down); border: 1px solid var(--down); padding: 0.3rem 0.6rem; font-size: 0.8rem; }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 1.25rem; margin-bottom: 1.5rem; }
+    .form-row { display: flex; gap: 0.75rem; flex-wrap: wrap; }
+    input { flex: 1; min-width: 200px; background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 0.6rem 0.8rem; border-radius: 6px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 0.5rem; }
+    th, td { text-align: left; padding: 0.75rem 0.5rem; border-bottom: 1px solid var(--border); font-size: 0.92rem; }
+    th { color: var(--muted); font-weight: 600; font-size: 0.8rem; text-transform: uppercase; }
+    .badge { padding: 0.25rem 0.6rem; border-radius: 999px; font-size: 0.75rem; font-weight: 700; }
+    .UP { background: rgba(16, 185, 129, 0.15); color: var(--up); }
+    .DOWN { background: rgba(239, 68, 68, 0.15); color: var(--down); }
+    .PENDING { background: rgba(245, 158, 11, 0.15); color: var(--pending); }
+    .OPEN { background: rgba(239, 68, 68, 0.15); color: var(--down); }
+    .RESOLVED { background: rgba(16, 185, 129, 0.15); color: var(--up); }
+    .incident-item { padding: 0.75rem 0; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; gap: 1rem; }
+    .incident-item:last-child { border-bottom: none; }
+    .muted { color: var(--muted); font-size: 0.85rem; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div>
+        <h1>⚡ CloudPulse Monitor</h1>
+        <p class="subtitle">Real-Time Service Uptime, Latency & Incident Tracker • Codomax DevOps Track</p>
+      </div>
+      <button id="checkBtn" onclick="runChecks()">Run Health Checks Now</button>
+    </header>
+
+    <div class="card">
+      <h2 style="font-size: 1.05rem; margin-bottom: 0.75rem;">Register Target Endpoint</h2>
+      <form class="form-row" onsubmit="addService(event)">
+        <input type="text" id="svcName" placeholder="Service Name (e.g., Auth API)" required />
+        <input type="text" id="svcUrl" placeholder="Endpoint URL (e.g., https://httpbin.org/status/200)" required />
+        <button type="submit">+ Add Endpoint</button>
+      </form>
+    </div>
+
+    <div class="card">
+      <h2 style="font-size: 1.05rem; margin-bottom: 0.5rem;">Monitored Endpoints</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Service</th>
+            <th>Endpoint URL</th>
+            <th>Status</th>
+            <th>Latency</th>
+            <th>Last Checked</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody id="servicesBody"></tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h2 style="font-size: 1.05rem; margin-bottom: 0.5rem;">Incident Log</h2>
+      <div id="incidentsList" class="muted">No incidents recorded.</div>
+    </div>
+  </div>
+
+  <script>
+    async function loadDashboard() {
+      const res = await fetch('/api/status');
+      const data = await res.json();
+
+      const tbody = document.getElementById('servicesBody');
+      tbody.innerHTML = data.services.map(s => `
+        <tr>
+          <td><strong>${s.name}</strong></td>
+          <td class="muted">${s.url}</td>
+          <td><span class="badge ${s.status}">${s.status}${s.status_code ? ' (' + s.status_code + ')' : ''}</span></td>
+          <td>${s.latency_ms !== null ? s.latency_ms + ' ms' : '—'}</td>
+          <td class="muted">${s.last_checked}</td>
+          <td><button class="danger" onclick="deleteService(${s.id})">Remove</button></td>
+        </tr>
+      `).join('');
+
+      const incDiv = document.getElementById('incidentsList');
+      if (data.incidents.length === 0) {
+        incDiv.innerHTML = '<p class="muted">All systems operational — zero incidents logged.</p>';
+      } else {
+        incDiv.innerHTML = data.incidents.map(i => `
+          <div class="incident-item">
+            <div>
+              <strong>${i.service_name}</strong> <span class="muted">(${i.url})</span>
+              <div class="muted">${i.details}</div>
+            </div>
+            <div style="text-align: right;">
+              <span class="badge ${i.state}">${i.state}</span>
+              <div class="muted" style="margin-top: 0.25rem;">${i.timestamp}</div>
+            </div>
+          </div>
+        `).join('');
+      }
+    }
+
+    async function runChecks() {
+      const btn = document.getElementById('checkBtn');
+      btn.textContent = 'Pinging...';
+      btn.disabled = true;
+      await fetch('/api/check', { method: 'POST' });
+      await loadDashboard();
+      btn.textContent = 'Run Health Checks Now';
+      btn.disabled = false;
+    }
+
+    async function addService(e) {
+      e.preventDefault();
+      const name = document.getElementById('svcName').value;
+      const url = document.getElementById('svcUrl').value;
+      await fetch('/api/services', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, url })
+      });
+      document.getElementById('svcName').value = '';
+      document.getElementById('svcUrl').value = '';
+      await loadDashboard();
+    }
+
+    async function deleteService(id) {
+      await fetch('/api/services/' + id, { method: 'DELETE' });
+      await loadDashboard();
+    }
+
+    loadDashboard();
+  </script>
+</body>
+</html>
